@@ -46,7 +46,36 @@ interface AgentDefaults {
   tools?: string;
   skills?: string;
   thinking?: string;
+  denyTools?: string;
+  spawning?: boolean;
   body?: string;
+}
+
+/** Tools that are gated by `spawning: false` */
+const SPAWNING_TOOLS = new Set(["subagent", "parallel_subagents", "subagents_list", "subagent_resume"]);
+
+/**
+ * Resolve the effective set of denied tool names from agent defaults.
+ * `spawning: false` expands to all SPAWNING_TOOLS.
+ * `deny-tools` adds individual tool names on top.
+ */
+function resolveDenyTools(agentDefs: AgentDefaults | null): Set<string> {
+  const denied = new Set<string>();
+  if (!agentDefs) return denied;
+
+  // spawning: false → deny all spawning tools
+  if (agentDefs.spawning === false) {
+    for (const t of SPAWNING_TOOLS) denied.add(t);
+  }
+
+  // deny-tools: explicit list
+  if (agentDefs.denyTools) {
+    for (const t of agentDefs.denyTools.split(",").map((s) => s.trim()).filter(Boolean)) {
+      denied.add(t);
+    }
+  }
+
+  return denied;
 }
 
 function loadAgentDefaults(agentName: string): AgentDefaults | null {
@@ -67,11 +96,14 @@ function loadAgentDefaults(agentName: string): AgentDefaults | null {
     };
     // Extract body (everything after frontmatter)
     const body = content.replace(/^---\n[\s\S]*?\n---\n*/, "").trim();
+    const spawningRaw = get("spawning");
     return {
       model: get("model"),
       tools: get("tools"),
       skills: get("skill") ?? get("skills"),
       thinking: get("thinking"),
+      denyTools: get("deny-tools"),
+      spawning: spawningRaw != null ? spawningRaw === "true" : undefined,
       body: body || undefined,
     };
   }
@@ -285,6 +317,12 @@ async function runSubagent(
       }
     }
 
+    // Resolve denied tools from agent frontmatter (spawning + deny-tools)
+    const denySet = resolveDenyTools(agentDefs);
+    const envPrefix = denySet.size > 0
+      ? `PI_DENY_TOOLS=${shellEscape([...denySet].join(","))} `
+      : "";
+
     // Write context to artifact file
     const sessionId = ctx.sessionManager.getSessionId();
     const artifactDir = getArtifactDir(ctx.cwd, sessionId);
@@ -295,7 +333,7 @@ async function runSubagent(
     writeFileSync(artifactPath, fullTask, "utf8");
     parts.push(`@${artifactPath}`);
 
-    const piCommand = parts.join(" ");
+    const piCommand = envPrefix + parts.join(" ");
     const command = `${piCommand}; echo '__SUBAGENT_DONE_'${exitStatusVar()}'__'`;
     sendCommand(surface, command);
 
@@ -397,7 +435,15 @@ async function runSubagent(
 }
 
 export default function subagentsExtension(pi: ExtensionAPI) {
-  pi.registerTool({
+  // Tools denied via PI_DENY_TOOLS env var (set by parent agent based on frontmatter)
+  const deniedTools = new Set(
+    (process.env.PI_DENY_TOOLS ?? "").split(",").map((s) => s.trim()).filter(Boolean)
+  );
+
+  const shouldRegister = (name: string) => !deniedTools.has(name);
+
+  // ── subagent tool ──
+  shouldRegister("subagent") && pi.registerTool({
     name: "subagent",
     label: "Subagent",
     description:
@@ -597,7 +643,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     },
   });
 
-  // parallel_subagents tool — run multiple autonomous subagents concurrently
+  // ── parallel_subagents tool ──
   const ParallelSubagentEntry = Type.Object({
     name: Type.String({ description: "Display name for this subagent" }),
     task: Type.String({ description: "Task/prompt for the sub-agent" }),
@@ -608,7 +654,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     tools: Type.Optional(Type.String({ description: "Comma-separated tools" })),
   });
 
-  pi.registerTool({
+  shouldRegister("parallel_subagents") && pi.registerTool({
     name: "parallel_subagents",
     label: "Parallel Subagents",
     description:
@@ -841,8 +887,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     },
   });
 
-  // subagents_list tool — discover available agent definitions
-  pi.registerTool({
+  // ── subagents_list tool ──
+  shouldRegister("subagents_list") && pi.registerTool({
     name: "subagents_list",
     label: "List Subagents",
     description:
@@ -922,8 +968,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     },
   });
 
-  // set_tab_title tool — update the current tab/window title and workspace/session
-  pi.registerTool({
+  // ── set_tab_title tool ──
+  shouldRegister("set_tab_title") && pi.registerTool({
     name: "set_tab_title",
     label: "Set Tab Title",
     description:
@@ -956,8 +1002,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     },
   });
 
-  // subagent_resume tool — resume a previous subagent session
-  pi.registerTool({
+  // ── subagent_resume tool ──
+  shouldRegister("subagent_resume") && pi.registerTool({
     name: "subagent_resume",
     label: "Resume Subagent",
     description:
