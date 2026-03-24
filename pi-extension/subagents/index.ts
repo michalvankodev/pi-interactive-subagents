@@ -370,9 +370,12 @@ async function launchSubagent(
   // When forking, the sub-agent already has the full conversation context.
   // Only send the user's task as a clean message — no wrapper instructions
   // that would confuse the agent into thinking it needs to restart.
-  const modeHint = "Complete your task. When finished, call the subagent_done tool. The user can interact with you at any time.";
-  const summaryInstruction =
-    "Your FINAL assistant message (before calling subagent_done or before the user exits) should summarize what you accomplished.";
+  const modeHint = agentDefs?.autoExit
+    ? "Complete your task autonomously."
+    : "Complete your task. When finished, call the subagent_done tool. The user can interact with you at any time.";
+  const summaryInstruction = agentDefs?.autoExit
+    ? "Your FINAL assistant message should summarize what you accomplished."
+    : "Your FINAL assistant message (before calling subagent_done or before the user exits) should summarize what you accomplished.";
   const denySet = resolveDenyTools(agentDefs);
   const agentType = params.agent ?? params.name;
   const tabTitleInstruction = denySet.has("set_tab_title") ? "" :

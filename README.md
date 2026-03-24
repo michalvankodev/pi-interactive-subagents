@@ -216,8 +216,30 @@ You are a specialized agent that does X...
 | `skills` | string | Comma-separated skill names to auto-load |
 | `spawning` | boolean | Set `false` to deny all subagent-spawning tools |
 | `deny-tools` | string | Comma-separated extension tool names to deny |
-| `auto-exit` | boolean | Auto-shutdown when the agent finishes its turn (no need for `subagent_done` call) |
+| `auto-exit` | boolean | Auto-shutdown when the agent finishes its turn — no `subagent_done` call needed. If the user sends any input, auto-exit is permanently disabled and the user takes over the session. Recommended for autonomous agents (scout, worker); not for interactive ones (planner). |
 | `cwd` | string | Default working directory (absolute or relative to project root) |
+
+---
+
+### `auto-exit`
+
+When set to `true`, the agent session shuts down automatically as soon as the agent finishes its turn — no explicit `subagent_done` call is needed.
+
+**Behavior:**
+- The session closes after the agent's final message (on the `agent_end` event)
+- If the user sends **any input** before the agent finishes, auto-exit is permanently disabled for that session — the user takes over interactively
+- The modeHint injected into the agent's task is adjusted accordingly: autonomous agents see "Complete your task autonomously." rather than instructions to call `subagent_done`
+
+**When to use:**
+- ✅ Autonomous agents (scout, worker, reviewer) that run to completion
+- ❌ Interactive agents (planner, iterate) where the user drives the session
+
+```yaml
+---
+name: scout
+auto-exit: true
+---
+```
 
 ---
 
